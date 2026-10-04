@@ -1,4 +1,4 @@
-"""Steps 4-6: time-aware evaluation of four benchmarks and a gradient-boosted model on the Spark-built features.
+"""Steps 4-6: time-aware evaluation of four benchmarks and two gradient-boosted models (fresh and 28-day-old inputs) on the Spark-built features.
 
     ./venv/bin/python analyze.py   (after features.py)  -> results/*.csv, results/predictions.csv.gz
 
@@ -7,11 +7,12 @@ whose labels are public in sales_train_evaluation.csv, so it is NOT the hidden t
 days <= d and forecasts days d+1..d+28. No random splits anywhere; no hyper-parameter was tuned (one fixed setting, below).
 Methods: naive (last day repeated), seasonal naive 7 (last week repeated), moving average (mean of the last 28 days), zero (always 0; a reference that
 shows how MAE rewards the median on intermittent series), and HistGradientBoosting (sklearn, Poisson loss, 300 iterations, learning rate 0.1,
-63 leaves, min 200 rows per leaf) trained per origin on the target days d-729..d only, using the features from features.py.
+63 leaves, min 200 rows per leaf) trained per origin on the target days d-729..d only, using the features from features.py, twice: "hgb" with inputs anchored at the forecast origin plus the horizon h
+(the main model), and "hgb_gap28" with only inputs anchored 28 days before the target (the first design, kept as an ablation).
 Scores: RMSE and MAE pooled over all series-days; bottom-level WRMSSE-style = sum_i w_i * RMSSE_i / sum_i w_i with RMSSE_i = sqrt(mean_h (y-yhat)^2 / s_i),
 s_i = mean of squared one-day differences from the series' first sale to d, w_i = revenue (units x shelf price) of the 28 days before d; series with s_i = 0 are dropped.
 This is the M5 metric at its lowest of 12 aggregation levels only, not the official WRMSSE. Intermittency = share of zero-sales days over the 364 days before d
-(or since launch). Feature importance = permutation importance (RMSE increase when one column is shuffled) on the validation windows.
+(or since launch; a series that has not launched yet has no bin). Feature importance (main model only) = permutation importance (RMSE increase when one column is shuffled) on the validation windows.
 """
 import csv
 import gzip

@@ -4,7 +4,7 @@
 
 Streams the raw M5 CSVs: re-derives the 300-item sample from md5(item_id), the full-vs-sample audit over all 30,490 series, the four benchmark
 forecasts and their scores, the scale/weights of the WRMSSE-style metric, the intermittency and horizon tables, and re-scores the stored
-gradient-boosting predictions (both models) (results/predictions.csv.gz) against the raw sales. What it can NOT recompute: the gradient-boosting fit itself and the
+gradient-boosting predictions (both models), and recounts the worst-case tables (results/predictions.csv.gz) against the raw sales. What it can NOT recompute: the gradient-boosting fit itself and the
 permutation importances (library fits, disclosed); for those it checks the stored predictions are complete and non-negative and that the importance
 table lists exactly the 26 model features.
 """
@@ -115,6 +115,10 @@ def main():
     bins_acc = {}
     hor_acc = {}
     sso = {k: [] for k in METHODS}
+    ssb = {k: {b: [] for b in HORS} for k in METHODS}
+    fmx = {k: [] for k in METHODS}
+    fmn = {k: [] for k in METHODS}
+    skeys, hmx, mbf, maf = [], [], [], []
     for d in ORIGINS:
         wsum, wr = 0.0, {k: 0.0 for k in METHODS}
         sse = {k: 0.0 for k in METHODS}
@@ -131,8 +135,16 @@ def main():
             w = sum(hist[t - 1] * price.get((store, item, wk[t]), 0.0) for t in range(d - 27, d + 1))
             seg2 = hist[max(first, d - 364):]
             bi = next((lab for lo, hi, lab in BINS if lo <= sum(1 for v in seg2 if v == 0) / len(seg2) < hi), None) if seg2 else None
+            skeys.append((d, sid))
+            hmx.append(max(hist))
+            mbf.append(sum(hist[-28:]) / 28.0)
+            maf.append(sum(act) / H)
             for k in METHODS:
                 e = [pr[k][i] - act[i] for i in range(H)]
+                fmx[k].append(max(pr[k]))
+                fmn[k].append(sum(pr[k]) / H)
+                for a, bb in HORS:
+                    ssb[k][(a, bb)].append(sum(v * v for v in e[a - 1:bb]))
                 ss = sum(v * v for v in e)
                 sse[k] += ss
                 sso[k].append(ss)
@@ -182,6 +194,26 @@ def main():
         same(r["share_sse_worst20"], sum(v[-20:]) / sum(v), "share worst 20")
         same(r["rmse_all"], math.sqrt(sum(v) / (n * H)), "pooled rmse")
         same(r["rmse_without_worst20"], math.sqrt(sum(v[:-20]) / ((n - 20) * H)), "rmse without worst 20")
+    for r in read("worst_case.csv"):
+        m = r["method"]
+        v = sso[m]
+        j = max(range(len(v)), key=lambda i: v[i])
+        assert (skeys[j][1], str(skeys[j][0])) == (r["id"], r["origin"]), (m, skeys[j], r["id"], r["origin"])
+        same(r["share_of_method_sse"], v[j] / sum(v), f"worst share {m}")
+        same(r["max_forecast"], fmx[m][j], f"max forecast {m}")
+        same(r["max_sale_before_origin"], hmx[j], "max sale before origin")
+        same(r["mean_sales_28d_before"], mbf[j], "mean sales before")
+        same(r["mean_actual"], maf[j], "mean actual")
+        same(r["mean_forecast"], fmn[m][j], f"mean forecast {m}")
+    kh = max(range(len(sso["hgb"])), key=lambda i: sso["hgb"][i])
+    for r in read("without_worst_case.csv"):
+        m = r["method"]
+        bands = HORS if r["scope"] == "pooled" else [tuple(int(x) for x in r["scope"].split("-"))]
+        days = 28 if r["scope"] == "pooled" else bands[0][1] - bands[0][0] + 1
+        arrs = [ssb[m][b] for b in bands]
+        n = len(arrs[0])
+        same(r["rmse_all"], math.sqrt(sum(sum(a) for a in arrs) / (n * days)), f"rmse {r['scope']} {m}")
+        same(r["rmse_without_case"], math.sqrt(sum(sum(a) - a[kh] for a in arrs) / ((n - 1) * days)), f"rmse without case {r['scope']} {m}")
     imp = read("importance.csv")
     assert sorted(r["feature"] for r in imp) == sorted(FEATS)
     count += 1

@@ -40,13 +40,19 @@ def bars(ax, col, title, fs=8.5, fmt="{:.2f}"):
     ax.set_title(title, fontsize=12); ax.grid(axis="x", visible=False); ax.set_ylim(0, max(v) * 1.15)
 
 
-def horizon(ax, methods=("seasonal_naive_7", "moving_avg_28", "hgb", "hgb_gap28")):
-    hs = ["1-7", "8-14", "15-21", "22-28"]; x = np.arange(4); w = 0.2
+WC = pd.read_csv(R / "without_worst_case.csv")
+WORST = pd.read_csv(R / "worst_case.csv").set_index("method").loc["hgb"]
+
+
+def horizon(ax, without=False, methods=("seasonal_naive_7", "moving_avg_28", "hgb")):
+    hs = ["1-7", "8-14", "15-21", "22-28"]; x = np.arange(4); w = 0.26
     for i, m in enumerate(methods):
-        v = [HZ[(HZ.horizon == h) & (HZ.method == m)].rmse.iloc[0] for h in hs]
-        ax.bar(x + (i - 1.5) * w, v, width=w * 0.92, color=COL[m], label=NAME[m])
-    ax.set_xticks(x); ax.set_xticklabels([f"days {h}" for h in hs]); ax.set_ylabel("RMSE (units per day)"); ax.grid(axis="x", visible=False)
-    ax.legend(frameon=False, labelcolor=INK, fontsize=8.5, loc="upper left")
+        v = [WC[(WC.scope == h) & (WC.method == m)].rmse_without_case.iloc[0] for h in hs] if without else [HZ[(HZ.horizon == h) & (HZ.method == m)].rmse.iloc[0] for h in hs]
+        ax.bar(x + (i - 1) * w, v, width=w * 0.92, color=COL[m], label=NAME[m])
+        for xi, vi in zip(x + (i - 1) * w, v):
+            ax.text(xi, vi, f"{vi:.2f}", ha="center", va="bottom", fontsize=7.5, color=INK)
+    ax.set_xticks(x); ax.set_xticklabels([f"days {h}" for h in hs]); ax.set_ylabel("RMSE (units per day)"); ax.grid(axis="x", visible=False); ax.set_ylim(0, 4.7)
+    ax.legend(frameon=False, labelcolor=INK, fontsize=8.5, loc="upper right", ncol=3)
 
 
 def intermittency(axes):
@@ -65,7 +71,7 @@ def cover():
     a, h = OV.loc["hgb"], OV.loc["moving_avg_28"]
     fig.suptitle(f"Boosted trees edge out a 28-day average on the scaled, revenue-weighted error ({a.wrmsse:.3f} vs {h.wrmsse:.3f}), not on RMSE ({a.rmse:.2f} vs {h.rmse:.2f})", fontsize=15, x=0.02, ha="left", y=0.98)
     bars(axes[0], "wrmsse", "WRMSSE-style error (lower is better)", fs=10)
-    horizon(axes[1]); axes[1].set_title("RMSE by forecast day: stale inputs wreck the first model", fontsize=12)
+    horizon(axes[1]); axes[1].set_title("RMSE by forecast day: the week-1 loss traces to one series", fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.94)); fig.savefig(HERE / "charts" / "00_cover.png", dpi=100); plt.close(fig)
 
 
@@ -84,7 +90,9 @@ def main():
     ax.set_xticks(range(5)); ax.set_xticklabels([f"d_{o}" + ("\n(M5 validation window)" if o == 1913 else "") for o in sorted(BO.origin.unique())], fontsize=9)
     ax.set_ylabel("WRMSSE-style error"); ax.set_ylim(0.7, 1.3); ax.set_xlabel("forecast origin (28 days ahead of each)"); ax.legend(frameon=False, labelcolor=INK, fontsize=9, ncol=2, loc="upper right")
     save(fig, "02_origins.png")
-    fig, ax = plt.subplots(figsize=(10, 3.8)); horizon(ax); save(fig, "03_horizon.png")
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.0)); horizon(axes[0]); horizon(axes[1], without=True)
+    axes[0].set_title("All 15,000 series-origins", fontsize=12); axes[1].set_title(f"Without {WORST.id.replace('_evaluation', '')} at d_{WORST.origin}", fontsize=12)
+    save(fig, "03_horizon.png")
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.1)); intermittency(axes); save(fig, "04_intermittency.png")
     fig, ax = plt.subplots(figsize=(10, 4.2))
     t = IM.head(12).iloc[::-1]

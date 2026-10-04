@@ -1,20 +1,25 @@
-"""Steps 2-3 (PySpark): audit the full M5 table at scale, then build the long-form feature table for a documented sample of series.
+"""Steps 2-3 (PySpark): audit the full M5 table at scale, then build the long-form task/feature table for a documented sample of series.
 
-    ./venv/bin/python features.py   -> results/full_series_stats.csv (one row per sampling stratum), results/sample_items.csv,
-                                       data/features.parquet (not committed)
+    ./venv/bin/python features.py   -> results/full_vs_sample.csv, results/sample_items.csv,
+                                       data/base.parquet, data/features.parquet (neither committed)
 
 Spark 4 in local[4] mode, driver memory 3g (the machine is shared).
 
 Sampling rule (fixed before looking at any score): rank the 3,049 items by md5(item_id) (hex string, ascending), keep the first 300,
 and keep all 10 stores for each: 3,000 store-item series x 1,941 days = 5.82 M rows. md5 order is arbitrary with respect to department,
-sales volume or intermittency, and anyone can reproduce it. Section "full" below checks the sample against all 30,490 series.
+sales volume or intermittency, and anyone can reproduce it. results/full_vs_sample.csv checks the sample against all 30,490 series
+(share of zero-sales days and units per day, from each series' first sale to d_1913).
 
-Leak-free design. Every forecast is made at an origin day d for the 28 days d+1..d+28. A target day t may therefore only use sales up to day
-t-28 (that is d at the longest horizon), so every sales-derived feature is anchored at t-28: weekly lags 28/35/42 (the 7-day lag pattern
-shifted by the 28-day information gap), rolling means/std of the 28-day-shifted series, the share of selling days, the same-weekday mean
-of 4 weeks, and an expanding series mean (the time-aware "id encoding": the item enters through its own history, never through an ordinal code).
-Calendar, events, SNAP and the shelf price of day t are treated as known in advance (the competition publishes them for the forecast
-window; a retailer plans them). Missing values (history not long enough) stay null.
+Leak-free design. A forecast is made at an origin o for the target days t = o+1..o+28 (horizon h = t-o). data/features.parquet has one row per
+(series, target day t, origin o):
+  - training rows (origin = 0): every t >= 1071 with h = t mod 28 + 1, so each horizon appears equally often and o = t-h < t;
+  - validation rows (origin = d): for each evaluation origin d in 1801, 1829, 1857, 1885, 1913, t = d+1..d+28, o = d.
+Main model ("hgb"): every sales feature is anchored at the origin o (sales on day o, means over 7/28/91 days ending at o, standard deviation and
+share of selling days over 28, an expanding mean, days since the last sale, the same-weekday sales 1-3 weeks back that are <= o) plus the horizon h.
+Ablation ("hgb_gap28", the first design): features anchored at t-28 (weekly lags 28/35/42, 7/28/91-day means ending at t-28, ...), which are legal
+for any horizon up to 28 but 28 days old at the longest. Calendar, events, SNAP and the shelf price of day t (and its changes) are treated as known in
+advance (the competition publishes them for the forecast window; a retailer plans them). The item enters only through its own history (expanding mean),
+never through an ordinal code. Missing values (history not long enough) stay null.
 """
 import hashlib
 import json

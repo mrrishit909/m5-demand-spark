@@ -1,0 +1,3 @@
+group,series,mean_zero_share,median_zero_share,share_series_zero_gt_50,mean_units_per_day,total_units,series_days
+"all 30,490 series",30490,0.6011626984,0.6343126967,0.6733683175,1.3475598227,65695409,45942500
+"sample 3,000 series",3000,0.6021646324,0.6323987539,0.6613333333,1.4636593252,7238905,4609846
